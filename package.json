@@ -2,9 +2,9 @@
   "name": "elderschat",
   "version": "1.0.0",
   "description": "",
-  "main": "EldersChat.js",
+  "main": "MainServer.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node MainServer.js"
   },
   "author": "",
   "license": "ISC",
