@@ -19,4 +19,4 @@ var server = net.createServer(function (socket){
     })
 })
 
-server.listen(19034)
+server.listen(process.env.PORT || 5000)
