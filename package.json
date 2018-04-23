@@ -1,0 +1,21 @@
+{
+  "name": "elderschat",
+  "version": "1.0.0",
+  "description": "",
+  "main": "EldersChat.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "crypto-js": "^3.1.9-1",
+    "duplex-json-stream": "^1.0.1",
+    "fully-connected-topology": "^1.1.1",
+    "hash-to-port": "^1.0.0",
+    "ip": "^1.1.5",
+    "net": "^1.0.2",
+    "register-multicast-dns": "^1.1.0",
+    "stream-set": "^1.1.0"
+  }
+}
