@@ -1,13 +1,11 @@
 var net = require('net')
 var jsonStream = require('duplex-json-stream')
-const ip          = require('ip');
+const ip       = require('ip');
 
 var streams = []
 
 var server = net.createServer(function (socket){
 
-    console.log(ip.address())
-    console.log(process.env.PORT)
     socket = jsonStream(socket)
 
     socket.on('data', function (data){
@@ -23,4 +21,4 @@ var server = net.createServer(function (socket){
     })
 })
 
-server.listen(process.env.PORT || 5000)
+server.listen(9034)
