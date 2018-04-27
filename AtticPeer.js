@@ -55,6 +55,7 @@ var network = peernet()
 var server  = network.createServer()
 
 var streams = []
+
 var peers   = [] /* List of username of connected nodes */
 var sset    = streamSet() /* TODO, No current use */
 
@@ -77,7 +78,6 @@ function greetDiscoveryServer(name)
     http.get('http://ehudadler.ddns.net', function(res) {
         mainSocket = jsonStream(net.connect(9034, res.connection.remoteAddress))
         mainSocket.on('data', function (data) {
-            //console.log(data)
             if(data.type == 'Announcement')
             {
                 process.stdout.write(data.message)
@@ -89,15 +89,19 @@ function greetDiscoveryServer(name)
                     {  
                         if(!peers.includes(peer))
                         {
-                            connectToServer(peer)
                             peers.push(peer)
+                            connectToServer(peer)
                         }
                     }
                 });
             }
+            else if(data.type == 'Error')
+            {
+                console.log(data.message)
+            }
         })
         mainSocket.write({type: 'Greet', address: name})
-        clearText("WELCOME TO THE ELDERS OF ZION")
+        clearText("WELCOME TO THE ATTIC")
     })
 }
 
@@ -112,15 +116,16 @@ function connectToServer(address)
       
     stream.on('connect', function () {
         clearText('🛎    A NEW MEMBER HAS ARRIVED: ' + address + '    🛎')
-        streams.push(jsonStream(stream))
-        //console.log('(connected)')
+
+        streams[address] = jsonStream(stream)
     })
 
     stream.on('data', function (data) {
-        streams.forEach(function (otherPeers){
-            otherPeers.write(data)
-        })
-        //console.log('data:', data.toString())
+
+        for (var otherPeer in streams)
+        {
+            streams[otherPeer].write(data)
+        }
     })
 
 }
@@ -142,22 +147,36 @@ function setUpServer(me)
             {
                 clearText("[" + data.username +']: ' + data.message)
             }
-            else if (data.type == "announcement")
+            else if (data.type == "goodbye")
             {
+                delete streams[data.username]
+                peers.remove(peer)
+                sset.remove(socket)  
+
                 clearText("🚪   " + data.message)
             }
+            else if(data.type == "announcement")
+            {
+                clearText("🛎   " + data.message)
+            }
             
-            streams.forEach(function (otherPeers){
-                otherPeers.write(data)
-            });
+            for (var otherPeer in streams) 
+            {
+                streams[otherPeer].write(data)
+            }
         });
     });
      
     server.on('close', function() {
+        mainSocket.write({type: 'Goodbye', address: me})
+
         var next = seq++;
-        streams.forEach(function (otherPeers) {
-            otherPeers.write({type: 'announcement', log: id, seq: seq, username: me, message: me + " has left"});
-        });
+        for (var otherPeer in streams) 
+        {
+            streams[otherPeer].write({type: 'goodbye', log: id, seq: seq, username: me, message: me + " has left"});
+        }
+
+        server.close()
         console.log("\nGOODBYE");
     });
 
@@ -192,8 +211,11 @@ greetDiscoveryServer(me)
 /******** WRITE MESSAGE ********/
 process.stdin.on('data', function (data) {
     var next = seq++;
-    streams.forEach(function (otherPeers) {
-        otherPeers.write({type: 'message', log: id, seq: seq, username: me, message: data.toString().trim()});
-    });
+    
+    for (var otherPeer in streams) 
+    {
+        streams[otherPeer].write({type: 'message', log: id, seq: seq, username: me, message: data.toString().trim()});
+    }
     process.stdout.write('➜  ');
+    
 });
