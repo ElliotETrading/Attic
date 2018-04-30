@@ -206,7 +206,6 @@ function setUpServer(me)
 
             if(encrypted.type == "encrypt")
             {
-                
                 if(streams[encrypted.username] != undefined)
                 {
                     streams[encrypted.username]["key"] = encrypted.key
@@ -218,6 +217,28 @@ function setUpServer(me)
 
                 return
             }
+            else if (encrypted.type == "goodbye")
+            {
+
+                if (logs[encrypted.log] >= encrypted.seq || encrypted.username == me) return
+
+                logs[encrypted.log] = encrypted.seq 
+
+                delete streams[encrypted.username]
+                peers.splice(peers.indexOf(encrypted.username, 1))
+                sset.remove(socket)  
+                clearText("🚪   " + encrypted.message)
+
+                for (var otherPeer in streams)
+                {
+                    if(streams[otherPeer].stream != undefined)
+                    {
+                        streams[otherPeer].stream.write(encrypted)
+                    }
+                 }
+
+                 return
+            }
 
             decryptMessage(encrypted).then(decrypted => {
                 displayMessage(encrypted, decrypted);
@@ -226,12 +247,18 @@ function setUpServer(me)
     });
      
     server.on('close', function() {
+
         mainSocket.write({type: 'Goodbye', address: me})
 
         var next = seq++;
         var message = me + " has left";
-        blockchain.addBlock(new Block(blockchain.chain.length, Date.now(), message, blockchain.getLatestBlock().previousHash));
-        sendMessage({type: 'goodbye', log: id, seq: seq, username: me, chain: blockchain});        
+        for (var otherPeer in streams)
+        {
+            if(streams[otherPeer].stream != undefined)
+            {
+                streams[otherPeer].stream.write({type: 'goodbye', log: id, seq: seq, username: me, message: message})
+            }
+         }
 
         server.close()
         console.log("\nGOODBYE");
@@ -250,18 +277,11 @@ function sendMessage(message)
 {
     for (var otherPeer in streams)
     {
-        console.log(otherPeer)
-        console.log(streams[otherPeer])
-
         if(streams[otherPeer].stream != undefined && streams[otherPeer].key != undefined)
         {
-            encrypt(message, streams[otherPeer].key).then(encrypted => {
-                streams[otherPeer].stream.write(encrypted)
+            encrypt(message, streams[otherPeer].key, otherPeer).then(encryptedData => {
+                streams[encryptedData.peer].stream.write(encryptedData.data)
             })
-        }
-        else
-        {
-            console.log("MISSING " + otherPeer)
         }
     }
 }
@@ -294,19 +314,12 @@ function displayMessage(encrypted, result)
         {
             clearText("[" + data.username +']: ' + blockchain.chain[blockchain.chain.length - 1].data)
         }
-        else if (data.type == "goodbye")
-        {
-            delete streams[data.username]
-            peers.remove(peer)
-            sset.remove(socket)  
-            clearText("🚪   " + blockchain.chain[blockchain.chain.length - 1].data)
-        }
         else if(data.type == "announcement")
         {
             clearText("🛎   " + blockchain.chain[blockchain.chain.length - 1].data)
         }
 
-    //sendMessage(data);
+    sendMessage(data);
 }
 async function createKeys() 
 {
@@ -320,10 +333,10 @@ async function decryptMessage(encrypted)
    const data = await crypto2.decrypt.rsa(encrypted, privateKey)
    return data
 }
-async function encrypt(message, publicKey)
+async function encrypt(message, publicKey, peer)
 {
     const data = await crypto2.encrypt.rsa(message, publicKey);
-    return data
+    return { data: data, peer: peer }
 }
 
 /************************************/
