@@ -26,6 +26,7 @@
 /// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 /// THE SOFTWARE.
 
+
 /************************************/
 /*                                  */
 /*            Modules               */
@@ -41,7 +42,59 @@ const streamSet   = require('stream-set')
 /// Standard modules
 const net   = require('net')
 const http  = require('http');
+const SHA256 = require('crypto-js/sha256')
+const crypto2 = require('crypto2');
 
+
+class Block {
+    constructor(index, timestamp, data, previousHash)
+    {
+        this.index          = index;
+        this.timestamp      = timestamp;
+        this.data           = data;
+        this.previousHash   = previousHash;
+        this.hash           = this.calculateHash();
+        this.nonce          = 0;
+    }
+
+    calculateHash(){ return SHA256(this.index + this.previousHash + this.timestamp + JSON.stringify(this.data) + this.nonce).toString() }
+
+    mineBlock(difficulty)
+    {
+        while(this.hash.substring(0, difficulty) !== Array(difficulty + 1).join("0")){
+            this.hash = this.calculateHash()
+            this.nonce += 1;
+        }
+        
+    }
+}
+
+class Blockchain 
+{
+    constructor()
+    {
+        this.chain = [this.createGenisisBlock()] // The array of blocks
+        this.difficulty = 3;
+    }
+
+    createGenisisBlock()
+    {
+        return new Block(0, "01/01/2018", "Genesis Block", "0");
+    }
+
+    getLatestBlock()
+    {
+        return this.chain[this.chain.length -1];
+    }
+
+    addBlock(newBlock)
+    {
+        newBlock.previousHash = this.getLatestBlock().hash;
+        newBlock.mineBlock(this.difficulty);
+        this.chain.push(newBlock);
+    }
+
+}
 
 /************************************/
 /*                                  */
@@ -50,9 +103,12 @@ const http  = require('http');
 /************************************/
 
 var me = process.argv[2] /* This will act as your username */
+var privateKey, publicKey 
 
 var network = peernet() 
 var server  = network.createServer()
+
+var blockchain = new Blockchain();
 
 var streams = []
 
@@ -116,16 +172,23 @@ function connectToServer(address)
       
     stream.on('connect', function () {
         clearText('🛎    A NEW MEMBER HAS ARRIVED: ' + address + '    🛎')
+        var jStream = jsonStream(stream)
 
-        streams[address] = jsonStream(stream)
+        if(streams[address] != undefined)
+        {
+            streams[address]["stream"] = jStream
+        }
+        else
+        {
+            streams[address] = {stream: jStream}
+        }
+        
+        var keyMessage = {type: 'encrypt', key: publicKey, username: me}
+        jStream.write(keyMessage);
     })
 
     stream.on('data', function (data) {
-
-        for (var otherPeer in streams)
-        {
-            streams[otherPeer].write(data)
-        }
+        sendMessage(data);
     })
 
 }
@@ -139,31 +202,26 @@ function setUpServer(me)
         socket = jsonStream(socket)
         sset.add(socket)
 
-        socket.on('data', function (data) {
-            if( logs[data.log] >= data.seq || data.username == me) return
+        socket.on('data', function (encrypted) {
 
-            logs[data.log] = data.seq
-            if(data.type == "message")
+            if(encrypted.type == "encrypt")
             {
-                clearText("[" + data.username +']: ' + data.message)
-            }
-            else if (data.type == "goodbye")
-            {
-                delete streams[data.username]
-                peers.remove(peer)
-                sset.remove(socket)  
+                
+                if(streams[encrypted.username] != undefined)
+                {
+                    streams[encrypted.username]["key"] = encrypted.key
+                }
+                else
+                {
+                    streams[encrypted.username] = {key: encrypted.key}
+                }
 
-                clearText("🚪   " + data.message)
+                return
             }
-            else if(data.type == "announcement")
-            {
-                clearText("🛎   " + data.message)
-            }
-            
-            for (var otherPeer in streams) 
-            {
-                streams[otherPeer].write(data)
-            }
+
+            decryptMessage(encrypted).then(decrypted => {
+                displayMessage(encrypted, decrypted);
+            })
         });
     });
      
@@ -171,10 +229,9 @@ function setUpServer(me)
         mainSocket.write({type: 'Goodbye', address: me})
 
         var next = seq++;
-        for (var otherPeer in streams) 
-        {
-            streams[otherPeer].write({type: 'goodbye', log: id, seq: seq, username: me, message: me + " has left"});
-        }
+        var message = me + " has left";
+        blockchain.addBlock(new Block(blockchain.chain.length, Date.now(), message, blockchain.getLatestBlock().previousHash));
+        sendMessage({type: 'goodbye', log: id, seq: seq, username: me, chain: blockchain});        
 
         server.close()
         console.log("\nGOODBYE");
@@ -189,6 +246,26 @@ function setUpServer(me)
     });
 }
 
+function sendMessage(message)
+{
+    for (var otherPeer in streams)
+    {
+        console.log(otherPeer)
+        console.log(streams[otherPeer])
+
+        if(streams[otherPeer].stream != undefined && streams[otherPeer].key != undefined)
+        {
+            encrypt(message, streams[otherPeer].key).then(encrypted => {
+                streams[otherPeer].stream.write(encrypted)
+            })
+        }
+        else
+        {
+            console.log("MISSING " + otherPeer)
+        }
+    }
+}
+
 function clearText(text)
 {
     process.stdout.clearLine();  // clear current text
@@ -198,6 +275,56 @@ function clearText(text)
     process.stdout.write('➜  ');
 }
 
+function displayMessage(encrypted, result)
+{
+
+    const data = JSON.parse(result);
+
+    if (logs[data.log] >= data.seq || data.username == me) return
+
+        logs[data.log] = data.seq            
+        var inChain = data.chain;
+
+        if(inChain.chain.length > blockchain.chain.length) // Update blockchain
+        {
+            blockchain.chain = inChain.chain;
+        }
+
+        if(data.type == "message")
+        {
+            clearText("[" + data.username +']: ' + blockchain.chain[blockchain.chain.length - 1].data)
+        }
+        else if (data.type == "goodbye")
+        {
+            delete streams[data.username]
+            peers.remove(peer)
+            sset.remove(socket)  
+            clearText("🚪   " + blockchain.chain[blockchain.chain.length - 1].data)
+        }
+        else if(data.type == "announcement")
+        {
+            clearText("🛎   " + blockchain.chain[blockchain.chain.length - 1].data)
+        }
+
+    //sendMessage(data);
+}
+async function createKeys() 
+{
+     await crypto2.createKeyPair().then(keys => {
+         privateKey = keys.privateKey
+         publicKey = keys.publicKey
+     })
+}
+async function decryptMessage(encrypted)
+{
+   const data = await crypto2.decrypt.rsa(encrypted, privateKey)
+   return data
+}
+async function encrypt(message, publicKey)
+{
+    const data = await crypto2.encrypt.rsa(message, publicKey);
+    return data
+}
 
 /************************************/
 /*                                  */
@@ -205,17 +332,34 @@ function clearText(text)
 /*                                  */
 /************************************/
 
-setUpServer(me)
-greetDiscoveryServer(me)
+createKeys().then(result => {
+    setUpServer(me)
+    greetDiscoveryServer(me)
+});
 
 /******** WRITE MESSAGE ********/
 process.stdin.on('data', function (data) {
     var next = seq++;
-    
-    for (var otherPeer in streams) 
+
+    var message = data.toString().trim();
+
+    if(message.charAt(0) == "\\") // Personal action
     {
-        streams[otherPeer].write({type: 'message', log: id, seq: seq, username: me, message: data.toString().trim()});
+        switch(message.substring(1))
+        {
+            case "chain":
+                console.log(JSON.stringify(blockchain, null, 4))
+                break;
+            default:
+                console.log("NOT AN ACTION")
+        }
+    }
+    else
+    {
+        blockchain.addBlock(new Block(blockchain.chain.length, Date.now(), message, blockchain.getLatestBlock().previousHash));
+        sendMessage({type: 'message', log: id, seq: seq, username: me, chain: blockchain})
     }
     process.stdout.write('➜  ');
-    
+
 });
+

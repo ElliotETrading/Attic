@@ -11,6 +11,7 @@
   "dependencies": {
     "assert": "^1.4.1",
     "crypto-js": "^3.1.9-1",
+    "crypto2": "^1.0.3",
     "duplex-json-stream": "^1.0.1",
     "externalip": "^1.0.2",
     "fully-connected-topology": "^1.1.1",
