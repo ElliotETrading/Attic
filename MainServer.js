@@ -2,6 +2,8 @@ var net = require('net')
 var jsonStream = require('duplex-json-stream')
 
 var streams = []
+var sockets = []
+
 
 var server = net.createServer(function (socket){
 
@@ -14,12 +16,13 @@ var server = net.createServer(function (socket){
             if(!streams.includes(data.address))
             {
                 streams.push(data.address)
+                sockets.push(sockets)
                 socket.write({type: 'Return_Request', peers: streams.slice(0, 20)})
             }
             else
             {
                 console.log("Invalid username")
-                socket.write({type: 'Error', message: "Peer with that username already exists, please pick another"})
+                socket.write({type: 'Error', error: "username", message: "Peer with that username already exists, please pick another"})
             }
         }
         else if (data.type == 'Request')
@@ -31,6 +34,13 @@ var server = net.createServer(function (socket){
             console.log("MEMEBER LEFT :(")
             streams.splice(streams.indexOf(data.address), 1);
         }
+    })
+
+    socket.on('close', function() {
+        console.log("SOCKET DOWN");
+        var index = sockets.indexOf(socket)
+        streams.splice(index, 1);
+        sockets.splice(index, 1);
     })
 })
 

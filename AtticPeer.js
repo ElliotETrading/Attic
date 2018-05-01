@@ -46,10 +46,15 @@ const SHA256 = require('crypto-js/sha256')
 const crypto2 = require('crypto2');
 
 
+/************************************/
+/*                                  */
+/*            Blockchain            */
+/*                                  */
+/************************************/
+
 class Block {
-    constructor(index, timestamp, data, previousHash)
+    constructor(timestamp, data, previousHash)
     {
-        this.index          = index;
         this.timestamp      = timestamp;
         this.data           = data;
         this.previousHash   = previousHash;
@@ -57,7 +62,7 @@ class Block {
         this.nonce          = 0;
     }
 
-    calculateHash(){ return SHA256(this.index + this.previousHash + this.timestamp + JSON.stringify(this.data) + this.nonce).toString() }
+    calculateHash(){ return SHA256(this.previousHash + this.timestamp + JSON.stringify(this.data) + this.nonce).toString() }
 
     mineBlock(difficulty)
     {
@@ -79,7 +84,7 @@ class Blockchain
 
     createGenisisBlock()
     {
-        return new Block(0, "01/01/2018", "Genesis Block", "0");
+        return new Block("01/01/2018", "Genesis Block", "0");
     }
 
     getLatestBlock()
@@ -92,6 +97,26 @@ class Blockchain
         newBlock.previousHash = this.getLatestBlock().hash;
         newBlock.mineBlock(this.difficulty);
         this.chain.push(newBlock);
+    }
+
+    isValidChain()
+    {
+        for(let blockIndex = 1; blockIndex < this.chain.length; blockIndex += 1)
+        {
+            const currentBlock = this.chain[blockIndex];
+            const previousBlock = this.chain[blockIndex - 1];
+
+            if(currentBlock.hash !== currentBlock.calculateHash())
+            {
+                return false;
+            }
+
+            if(currentBlock.previousHash !== previousBlock.hash)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
 }
@@ -191,6 +216,10 @@ function connectToServer(address)
         sendMessage(data);
     })
 
+    stream.on('close', function(data) {
+        console.log("SOMEONE LEFT")
+    })
+
 }
 
 function setUpServer(me)
@@ -198,7 +227,6 @@ function setUpServer(me)
     server.on('connection', function (socket) {
 
         mainSocket.write({type: 'Request'})
-
         socket = jsonStream(socket)
         sset.add(socket)
 
@@ -247,20 +275,8 @@ function setUpServer(me)
     });
      
     server.on('close', function() {
-
         mainSocket.write({type: 'Goodbye', address: me})
-
-        var next = seq++;
-        var message = me + " has left";
-        for (var otherPeer in streams)
-        {
-            if(streams[otherPeer].stream != undefined)
-            {
-                streams[otherPeer].stream.write({type: 'goodbye', log: id, seq: seq, username: me, message: message})
-            }
-         }
-
-        server.close()
+        goodbye();
         console.log("\nGOODBYE");
     });
 
@@ -316,10 +332,35 @@ function displayMessage(encrypted, result)
         }
         else if(data.type == "announcement")
         {
-            clearText("🛎   " + blockchain.chain[blockchain.chain.length - 1].data)
+            clearText("🛎   " + blockchain.chain[blockchain.chain.length - 1].data + " -- " + data.username)
         }
 
     sendMessage(data);
+}
+function goodbye()
+{
+    var next = seq++;
+    var message = me + " has left";
+
+    for (var otherPeer in streams)
+    {
+        if(streams[otherPeer].stream != undefined)
+        {
+            streams[otherPeer].stream.write({type: 'goodbye', log: id, seq: seq, username: me, message: message})
+            streams[otherPeer].stream.close();
+        }  
+    } 
+
+    streams = []
+    peers   = []
+    sset    = streamSet()
+}
+
+function clearAll()
+{
+    streams = []
+    peers   = []
+    sset    = streamSet()
 }
 async function createKeys() 
 {
@@ -355,6 +396,7 @@ process.stdin.on('data', function (data) {
     var next = seq++;
 
     var message = data.toString().trim();
+    var type = message.includes("@all") ? "announcement" : "message"
 
     if(message.charAt(0) == "\\") // Personal action
     {
@@ -363,14 +405,20 @@ process.stdin.on('data', function (data) {
             case "chain":
                 console.log(JSON.stringify(blockchain, null, 4))
                 break;
+            case "clear-all":
+                clearAll()
+                break;
+            case "request":
+                mainSocket.write({type: 'Request'})
+                break;
             default:
                 console.log("NOT AN ACTION")
         }
     }
     else
     {
-        blockchain.addBlock(new Block(blockchain.chain.length, Date.now(), message, blockchain.getLatestBlock().previousHash));
-        sendMessage({type: 'message', log: id, seq: seq, username: me, chain: blockchain})
+        blockchain.addBlock(new Block(Date.now(), message, blockchain.getLatestBlock().previousHash));
+        sendMessage({type: type, log: id, seq: seq, username: me, chain: blockchain})  
     }
     process.stdout.write('➜  ');
 
